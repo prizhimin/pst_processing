@@ -65,40 +65,6 @@ def format_datetime_gmt3(dt):
     return dt_gmt3.strftime('%Y-%m-%d %H:%M:%S (GMT+3)')
 
 
-def extract_text_from_rtf(rtf_bytes):
-    """Извлекает текст из RTF с HTML-вставками"""
-    try:
-        if isinstance(rtf_bytes, bytes):
-            try:
-                rtf_text = rtf_bytes.decode('utf-8', errors='replace')
-            except UnicodeDecodeError:
-                rtf_text = rtf_bytes.decode('cp1251', errors='replace')
-        else:
-            rtf_text = str(rtf_bytes)
-
-        clean_text = re.sub(r'\\[a-z0-9*]+(?:\[[^\]]*\])?[ -~]?', '', rtf_text)
-        clean_text = re.sub(r'\\\'[0-9a-f]{2}', '', clean_text)
-        clean_text = re.sub(r'\\[{}]', '', clean_text)
-
-        html_match = re.search(r'<html.*?>.*?</html>', clean_text, re.IGNORECASE | re.DOTALL)
-        if html_match:
-            html_content = html_match.group()
-            try:
-                soup = BeautifulSoup(html_content, 'html.parser')
-                text = soup.get_text(separator='\n', strip=True)
-                text = re.sub(r'\\u[0-9a-f]{4}', '', text)
-                text = re.sub(r'\s+', ' ', text).strip()
-                return text
-            except Exception:
-                pass
-
-        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-        return clean_text if clean_text else "Не удалось извлечь текст"
-    except Exception as e:
-        print(f"Ошибка при обработке RTF: {e}")
-        return "Ошибка при извлечении текста"
-
-
 def get_message_body(message):
     """Улучшенное извлечение тела письма с обработкой RTF"""
     try:
