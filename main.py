@@ -229,7 +229,7 @@ def parse_time_range(time_str):
     """Парсит строку с диапазоном времени"""
     try:
         start, end = map(int, time_str.split('-'))
-        return (start, end)
+        return start, end
     except Exception as e:
         print(f"[!] Ошибка при обработке диапазона времени {time_str}: {e}")
 
