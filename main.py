@@ -42,8 +42,9 @@ def get_recipients(message):
             name = getattr(recipient, 'name', '')
             if name:
                 recipients.append(name)
-    except:
-        pass
+    except Exception as e:
+        print(f"[!] Ошибка при получении получателей: {e}")
+        return []
     return recipients
 
 
@@ -99,7 +100,8 @@ def get_folder_path(message):
             path.append(getattr(folder, 'name', 'Unknown Folder'))
             folder = getattr(folder, 'parent_folder', None)
         return " > ".join(reversed(path))
-    except:
+    except Exception as e:
+        print(f"[!] Ошибка при получении пути к папке: {e}")
         return "Неизвестная папка"
 
 
@@ -228,8 +230,8 @@ def parse_time_range(time_str):
     try:
         start, end = map(int, time_str.split('-'))
         return (start, end)
-    except:
-        return None
+    except Exception as e:
+        print(f"[!] Ошибка при обработке диапазона времени {time_str}: {e}")
 
 
 def search_pst(pst_path, search_criteria, output_dir=None):
