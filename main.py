@@ -1,3 +1,13 @@
+# ================================================================================
+#                               PST File Search Tool
+# ================================================================================
+#
+# usage: main.py [-h] --output-dir OUTPUT_DIR [--sender SENDER] [--recipient RECIPIENT] [--subject SUBJECT]
+#                [--body BODY] [-sent-after SENT_AFTER] [--sent-before SENT_BEFORE] [--received-after RECEIVED_AFTER]
+#                [--received-before RECEIVED_BEFORE] [--sent-time SENT_TIME] [--received-time RECEIVED_TIME]
+#                pst_file
+# main.py: error: the following arguments are required: pst_file, --output-dir
+
 import os
 import argparse
 from datetime import datetime, timezone, timedelta
@@ -46,6 +56,53 @@ def get_recipients(message):
         print(f"[!] Ошибка при получении получателей: {e}")
         return []
     return recipients
+
+
+# def get_recipients(message):
+#     """Безопасное получение списка получателей сообщения"""
+#     recipients = []
+#     try:
+#         # Способ 1: Проверяем стандартный атрибут recipients
+#         if hasattr(message, 'recipients'):
+#             for recipient in message.recipients:
+#                 name = getattr(recipient, 'name', '')
+#                 if name:
+#                     recipients.append(name)
+#
+#         # Способ 2: Пробуем получить из transport_headers
+#         if not recipients and hasattr(message, 'transport_headers'):
+#             headers = getattr(message, 'transport_headers', '')
+#             if headers:
+#                 # Ищем строки To:, Cc:, Bcc: в заголовках
+#                 for line in headers.split('\n'):
+#                     if line.lower().startswith(('to:', 'cc:', 'bcc:')):
+#                         recipients.extend([addr.strip() for addr in line.split(':')[1].split(',') if addr.strip()])
+#
+#     except Exception as e:
+#         print(f"[!] Ошибка при получении получателей: {e}")
+#
+#     return recipients
+
+
+# def get_recipients(message):
+#     """Альтернативный способ получения получателей"""
+#     recipients = []
+#     try:
+#         # Пробуем получить через transport_headers
+#         headers = getattr(message, 'transport_headers', '')
+#         if headers:
+#             # Пример заголовка: "To: user1@example.com, user2@example.com"
+#             for line in headers.split('\n'):
+#                 if line.lower().startswith(('to:', 'cc:', 'bcc:')):
+#                     # Извлекаем адреса после To:/Cc:/Bcc:
+#                     addresses = line.split(':', 1)[1].strip()
+#                     # Разделяем по запятым и очищаем
+#                     recipients.extend([addr.strip() for addr in addresses.split(',')])
+#
+#     except Exception as e:
+#         print(f"[!] Ошибка при получении получателей: {e}")
+#
+#     return recipients
 
 
 def convert_to_gmt3(dt):
@@ -283,7 +340,6 @@ def process_message(message, search_criteria, msg_num, output_dir=None):
         recipients = get_recipients(message)
         subject = getattr(message, 'subject', 'Без темы')
         body = get_message_body(message)
-
         # Конвертируем время в GMT+3
         received_time = convert_to_gmt3(getattr(message, 'delivery_time', None))
         sent_time = convert_to_gmt3(getattr(message, 'client_submit_time', None))
