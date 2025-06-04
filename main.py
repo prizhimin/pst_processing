@@ -185,19 +185,21 @@ def detect_attachment_type(data):
 
 
 def save_attachments(message, attachments_dir):
-    """Сохраняет все вложения из письма с расширением по сигнатуре"""
+    """Сохраняет все вложения из письма с расширением по сигнатуре и уникальным номером"""
     try:
         if not hasattr(message, 'attachments') or message.number_of_attachments == 0:
             return 0
 
         saved_count = 0
+        attachment_id = 1  # Уникальный номер вложения
+
         for attachment in message.attachments:
             try:
                 # Получаем имя (если доступно)
-                filename = getattr(attachment, 'name', f'unnamed_{saved_count}')
+                filename = getattr(attachment, 'name', f'unnamed_{attachment_id}')
                 filename = filename.replace('\n', ' ').replace('\r', ' ').strip()
                 if not filename:
-                    filename = f'unnamed_{saved_count}'
+                    filename = f'unnamed_{attachment_id}'
 
                 # Чтение байтов вложения
                 data = attachment.read_buffer(attachment.size)
@@ -221,6 +223,10 @@ def save_attachments(message, attachments_dir):
 
                 saved_count += 1
                 print(f"    [+] Сохранено вложение: {os.path.basename(filepath)}")
+
+                # Увеличиваем уникальный номер для следующего вложения
+                attachment_id += 1
+
             except Exception as e:
                 print(f"    [!] Ошибка при сохранении вложения: {e}")
 
