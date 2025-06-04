@@ -68,6 +68,9 @@ def get_message_body(message):
     """Улучшенное извлечение тела письма с обработкой RTF"""
     try:
         body = getattr(message, 'plain_text_body', None)
+        # Убираем двойные пробелы
+        # body = re.sub(r'\n{2,}', '\n', body)
+
         if body:
             if isinstance(body, bytes):
                 body = body.decode('utf-8', errors='replace')
@@ -239,94 +242,99 @@ def save_attachments(message, attachments_dir):
         return 0
 
 
-# def save_message_as_txt(message, output_dir, msg_num):
-#     """Безопасное сохранение письма с временем в GMT+3"""
-#     try:
-#         sender = str(getattr(message, 'sender_name', None)) or "Неизвестный_отправитель"
-#         subject = str(getattr(message, 'subject', None)) or "Без_темы"
-#
-#         # Конвертируем время в GMT+3
-#         received_time = convert_to_gmt3(getattr(message, 'delivery_time', None))
-#         sent_time = convert_to_gmt3(getattr(message, 'client_submit_time', None))
-#
-#         date_part = (received_time or sent_time or datetime.now(GMT3)).strftime('%Y%m%d_%H%M')
-#         filename_base = f"{date_part}_{sanitize_filename(sender)}_{sanitize_filename(subject)}"
-#         filename = f"{filename_base}.txt"
-#         filepath = os.path.join(output_dir, filename)
-#
-#         body = get_message_body(message)
-#
-#         content = [
-#             f"ПАПКА: {get_folder_path(message)}",
-#             f"НОМЕР: {msg_num}",
-#             f"ОТПРАВИТЕЛЬ: {sender}",
-#             f"ТЕМА: {subject}",
-#             f"ОТПРАВЛЕНО: {format_datetime_gmt3(sent_time)}",
-#             f"ПОЛУЧЕНО: {format_datetime_gmt3(received_time)}",
-#             "\nТЕКСТ ПИСЬМА:",
-#             "=" * 80,
-#             body,
-#             "=" * 80
-#         ]
-#
-#         # Сохраняем письмо в любом случае
-#         with open(filepath, 'w', encoding='utf-8', errors='replace') as f:
-#             f.write('\n'.join(content))
-#
-#         # Сохраняем вложения, если они есть
-#         if hasattr(message, 'attachments') and message.number_of_attachments > 0:
-#             attachments_dir = os.path.join(output_dir, filename_base)
-#             os.makedirs(attachments_dir, exist_ok=True)
-#             saved_attachments = save_attachments(message, attachments_dir)
-#             content.append(f"\nВЛОЖЕНИЯ: {saved_attachments} файлов сохранено в {attachments_dir}")
-#
-#             # Обновляем файл с информацией о вложениях
-#             with open(filepath, 'w', encoding='utf-8', errors='replace') as f:
-#                 f.write('\n'.join(content))
-#
-#         print(f"[+] Сохранено письмо #{msg_num}: {filename}")
-#         return filepath
-#     except Exception as e:
-#         print(f"[!] Критическая ошибка при сохранении письма #{msg_num}: {str(e)}")
-#         return None
-
-
-def save_message_as_txt(message, attachments_dir):
-    """
-    Сохраняет текстовое содержимое письма в .txt файл.
-    Если у письма есть вложения, в имя файла добавляется "(X вложений)".
-    """
-
+def save_message_as_txt(message, output_dir, msg_num):
+    """Безопасное сохранение письма с временем в GMT+3"""
     try:
-        # Создаём папку, если её нет
-        os.makedirs(attachments_dir, exist_ok=True)
+        sender = str(getattr(message, 'sender_name', None)) or "Неизвестный_отправитель"
+        subject = str(getattr(message, 'subject', None)) or "Без_темы"
 
-        # Получаем ID сообщения
-        message_id = getattr(message, 'id', 'unknown')
+        # Конвертируем время в GMT+3
+        received_time = convert_to_gmt3(getattr(message, 'delivery_time', None))
+        sent_time = convert_to_gmt3(getattr(message, 'client_submit_time', None))
 
-        # Проверяем наличие вложений
+        date_part = (received_time or sent_time or datetime.now(GMT3)).strftime('%Y%m%d_%H%M')
+        filename_base = f"{date_part}_{sanitize_filename(sender)}_{sanitize_filename(subject)}"
+        # Число вложений
         has_attachments = hasattr(message, 'attachments') and message.number_of_attachments > 0
         num_attachments = message.number_of_attachments if has_attachments else 0
-
         # Формируем имя текстового файла
         suffix = f" ({num_attachments} вложений)" if num_attachments > 0 else ""
-        text_filename = f"message_{message_id}{suffix}.txt"
-        text_filepath = os.path.join(attachments_dir, text_filename)
+        filename = f"{filename_base}{suffix}.txt"
+        filepath = os.path.join(output_dir, filename)
 
-        # Получаем тело письма
-        body = getattr(message, 'body', '(тело письма отсутствует)')
+        body = get_message_body(message)
 
-        # Сохраняем текст письма в файл
-        with open(text_filepath, 'w', encoding='utf-8') as f:
-            f.write(body)
+        content = [
+            f"ПАПКА: {get_folder_path(message)}",
+            f"НОМЕР: {msg_num}",
+            f"ОТПРАВИТЕЛЬ: {sender}",
+            f"ТЕМА: {subject}",
+            f"ОТПРАВЛЕНО: {format_datetime_gmt3(sent_time)}",
+            f"ПОЛУЧЕНО: {format_datetime_gmt3(received_time)}",
+            "\nТЕКСТ ПИСЬМА:",
+            "=" * 80,
+            body,
+            "=" * 80
+        ]
 
-        print(f"    [i] Сохранён текст письма: {text_filename}")
+        # Сохраняем письмо в любом случае
+        with open(filepath, 'w', encoding='utf-8', errors='replace') as f:
+            f.write('\n'.join(content))
 
-        return 1  # Возвращаем 1, так как файл сохранён
+        # Сохраняем вложения, если они есть
+        if hasattr(message, 'attachments') and message.number_of_attachments > 0:
+            attachments_dir = os.path.join(output_dir, filename_base)
+            os.makedirs(attachments_dir, exist_ok=True)
+            saved_attachments = save_attachments(message, attachments_dir)
+            content.append(f"\nВЛОЖЕНИЯ: {saved_attachments} файлов сохранено в {attachments_dir}")
 
+            # Обновляем файл с информацией о вложениях
+            with open(filepath, 'w', encoding='utf-8', errors='replace') as f:
+                f.write('\n'.join(content))
+
+        print(f"[+] Сохранено письмо #{msg_num}: {filename}")
+        return filepath
     except Exception as e:
-        print(f"[!] Ошибка при сохранении текста письма: {e}")
-        return 0
+        print(f"[!] Критическая ошибка при сохранении письма #{msg_num}: {str(e)}")
+        return None
+
+
+# def save_message_as_txt(message, attachments_dir, msg_num):
+#     """
+#     Сохраняет текстовое содержимое письма в .txt файл.
+#     Если у письма есть вложения, в имя файла добавляется "(X вложений)".
+#     """
+#
+#     try:
+#         # Создаём папку, если её нет
+#         os.makedirs(attachments_dir, exist_ok=True)
+#
+#         # Получаем ID сообщения
+#         message_id = getattr(message, 'id', 'unknown')
+#
+#         # Проверяем наличие вложений
+#         has_attachments = hasattr(message, 'attachments') and message.number_of_attachments > 0
+#         num_attachments = message.number_of_attachments if has_attachments else 0
+#
+#         # Формируем имя текстового файла
+#         suffix = f" ({num_attachments} вложений)" if num_attachments > 0 else ""
+#         text_filename = f"message_{message_id}{suffix}.txt"
+#         text_filepath = os.path.join(attachments_dir, text_filename)
+#
+#         # Получаем тело письма
+#         body = getattr(message, 'body', '(тело письма отсутствует)')
+#
+#         # Сохраняем текст письма в файл
+#         with open(text_filepath, 'w', encoding='utf-8') as f:
+#             f.write(body)
+#
+#         print(f"    [i] Сохранён текст письма: {text_filename}")
+#
+#         return 1  # Возвращаем 1, так как файл сохранён
+#
+#     except Exception as e:
+#         print(f"[!] Ошибка при сохранении текста письма: {e}")
+#         return 0
 
 
 def parse_datetime(dt_str):
@@ -415,8 +423,7 @@ def process_message(message, search_criteria, msg_num, output_dir=None):
             print(f"    Отправлено: {format_datetime_gmt3(sent_time)}")
 
         if output_dir:
-            save_message_as_txt(message, output_dir)
-            # , msg_num)
+            save_message_as_txt(message, output_dir, msg_num)
     except Exception as e:
         print(f"[!] Ошибка при обработке сообщения #{msg_num}: {e}")
 
