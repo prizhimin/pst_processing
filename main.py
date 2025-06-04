@@ -6,7 +6,6 @@
 #                [--body BODY] [-sent-after SENT_AFTER] [--sent-before SENT_BEFORE] [--received-after RECEIVED_AFTER]
 #                [--received-before RECEIVED_BEFORE] [--sent-time SENT_TIME] [--received-time RECEIVED_TIME]
 #                pst_file
-# main.py: error: the following arguments are required: pst_file, --output-dir
 
 import os
 import argparse
@@ -16,6 +15,9 @@ import re
 import unicodedata
 from bs4 import BeautifulSoup
 from striprtf.striprtf import rtf_to_text
+import zipfile
+import io
+
 
 # Константа для временной зоны GMT+3
 GMT3 = timezone(timedelta(hours=3))
@@ -42,67 +44,6 @@ def sanitize_filename(filename):
     filename = filename.replace('\n', ' ').replace('\r', ' ')
     filename = filename.strip('. ')
     return filename[:250]
-
-
-def get_recipients(message):
-    """Получает список получателей сообщения"""
-    recipients = []
-    try:
-        for recipient in message.recipients:
-            name = getattr(recipient, 'name', '')
-            if name:
-                recipients.append(name)
-    except Exception as e:
-        print(f"[!] Ошибка при получении получателей: {e}")
-        return []
-    return recipients
-
-
-# def get_recipients(message):
-#     """Безопасное получение списка получателей сообщения"""
-#     recipients = []
-#     try:
-#         # Способ 1: Проверяем стандартный атрибут recipients
-#         if hasattr(message, 'recipients'):
-#             for recipient in message.recipients:
-#                 name = getattr(recipient, 'name', '')
-#                 if name:
-#                     recipients.append(name)
-#
-#         # Способ 2: Пробуем получить из transport_headers
-#         if not recipients and hasattr(message, 'transport_headers'):
-#             headers = getattr(message, 'transport_headers', '')
-#             if headers:
-#                 # Ищем строки To:, Cc:, Bcc: в заголовках
-#                 for line in headers.split('\n'):
-#                     if line.lower().startswith(('to:', 'cc:', 'bcc:')):
-#                         recipients.extend([addr.strip() for addr in line.split(':')[1].split(',') if addr.strip()])
-#
-#     except Exception as e:
-#         print(f"[!] Ошибка при получении получателей: {e}")
-#
-#     return recipients
-
-
-# def get_recipients(message):
-#     """Альтернативный способ получения получателей"""
-#     recipients = []
-#     try:
-#         # Пробуем получить через transport_headers
-#         headers = getattr(message, 'transport_headers', '')
-#         if headers:
-#             # Пример заголовка: "To: user1@example.com, user2@example.com"
-#             for line in headers.split('\n'):
-#                 if line.lower().startswith(('to:', 'cc:', 'bcc:')):
-#                     # Извлекаем адреса после To:/Cc:/Bcc:
-#                     addresses = line.split(':', 1)[1].strip()
-#                     # Разделяем по запятым и очищаем
-#                     recipients.extend([addr.strip() for addr in addresses.split(',')])
-#
-#     except Exception as e:
-#         print(f"[!] Ошибка при получении получателей: {e}")
-#
-#     return recipients
 
 
 def convert_to_gmt3(dt):
@@ -177,19 +118,11 @@ def check_time_in_range(dt, time_range):
         return t.hour >= start_hour or t.hour < end_hour
 
 
-def matches_criteria(sender, recipients, subject, body,
+def matches_criteria(sender, subject, body,
                      received_time, sent_time, criteria):
     """Проверяет соответствие сообщения критериям поиска"""
     if criteria.get('sender') and criteria['sender'].lower() not in sender.lower():
         return False
-
-    if criteria.get('recipient'):
-        recipient_match = any(
-            criteria['recipient'].lower() in r.lower()
-            for r in recipients
-        )
-        if not recipient_match:
-            return False
 
     if criteria.get('subject') and criteria['subject'].lower() not in subject.lower():
         return False
@@ -228,6 +161,75 @@ def matches_criteria(sender, recipients, subject, body,
     return True
 
 
+def detect_attachment_type(data):
+    """Определяет тип вложения по сигнатуре и содержимому"""
+    if data.startswith(b'%PDF'):
+        return 'pdf'
+    elif data.startswith(b'Rar!\x1A\x07\x00'):
+        return 'rar'
+    elif data.startswith(b'PK\x03\x04'):
+        # Это может быть docx/xlsx/zip
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                names = z.namelist()
+                if any(name.startswith('word/') for name in names):
+                    return 'docx'
+                elif any(name.startswith('xl/') for name in names):
+                    return 'xlsx'
+                else:
+                    return 'zip'
+        except Exception:
+            return 'zip'
+    else:
+        return 'bin'
+
+
+def save_attachments(message, attachments_dir):
+    """Сохраняет все вложения из письма с расширением по сигнатуре"""
+    try:
+        if not hasattr(message, 'attachments') or message.number_of_attachments == 0:
+            return 0
+
+        saved_count = 0
+        for attachment in message.attachments:
+            try:
+                # Получаем имя (если доступно)
+                filename = getattr(attachment, 'name', f'unnamed_{saved_count}')
+                filename = filename.replace('\n', ' ').replace('\r', ' ').strip()
+                if not filename:
+                    filename = f'unnamed_{saved_count}'
+
+                # Чтение байтов вложения
+                data = attachment.read_buffer(attachment.size)
+
+                # Определяем тип вложения по сигнатуре
+                ext = detect_attachment_type(data)
+                print(f'Расширение {ext}')
+                filename = os.path.splitext(filename)[0] + '.' + ext
+
+                # Создаём безопасный путь
+                filepath = os.path.join(attachments_dir, filename)
+                counter = 1
+                while os.path.exists(filepath):
+                    name, base_ext = os.path.splitext(filename)
+                    filepath = os.path.join(attachments_dir, f"{name}_{counter}{base_ext}")
+                    counter += 1
+
+                # Сохраняем файл
+                with open(filepath, 'wb') as f:
+                    f.write(data)
+
+                saved_count += 1
+                print(f"    [+] Сохранено вложение: {os.path.basename(filepath)}")
+            except Exception as e:
+                print(f"    [!] Ошибка при сохранении вложения: {e}")
+
+        return saved_count
+    except Exception as e:
+        print(f"[!] Ошибка при обработке вложений: {e}")
+        return 0
+
+
 def save_message_as_txt(message, output_dir, msg_num):
     """Безопасное сохранение письма с временем в GMT+3"""
     try:
@@ -239,7 +241,8 @@ def save_message_as_txt(message, output_dir, msg_num):
         sent_time = convert_to_gmt3(getattr(message, 'client_submit_time', None))
 
         date_part = (received_time or sent_time or datetime.now(GMT3)).strftime('%Y%m%d_%H%M')
-        filename = f"{date_part}_{sanitize_filename(sender)}_{sanitize_filename(subject)}.txt"
+        filename_base = f"{date_part}_{sanitize_filename(sender)}_{sanitize_filename(subject)}"
+        filename = f"{filename_base}.txt"
         filepath = os.path.join(output_dir, filename)
 
         body = get_message_body(message)
@@ -248,7 +251,6 @@ def save_message_as_txt(message, output_dir, msg_num):
             f"ПАПКА: {get_folder_path(message)}",
             f"НОМЕР: {msg_num}",
             f"ОТПРАВИТЕЛЬ: {sender}",
-            f"ПОЛУЧАТЕЛИ: {', '.join(get_recipients(message)) or 'Не указаны'}",
             f"ТЕМА: {subject}",
             f"ОТПРАВЛЕНО: {format_datetime_gmt3(sent_time)}",
             f"ПОЛУЧЕНО: {format_datetime_gmt3(received_time)}",
@@ -258,8 +260,20 @@ def save_message_as_txt(message, output_dir, msg_num):
             "=" * 80
         ]
 
+        # Сохраняем письмо в любом случае
         with open(filepath, 'w', encoding='utf-8', errors='replace') as f:
             f.write('\n'.join(content))
+
+        # Сохраняем вложения, если они есть
+        if hasattr(message, 'attachments') and message.number_of_attachments > 0:
+            attachments_dir = os.path.join(output_dir, filename_base)
+            os.makedirs(attachments_dir, exist_ok=True)
+            saved_attachments = save_attachments(message, attachments_dir)
+            content.append(f"\nВЛОЖЕНИЯ: {saved_attachments} файлов сохранено в {attachments_dir}")
+
+            # Обновляем файл с информацией о вложениях
+            with open(filepath, 'w', encoding='utf-8', errors='replace') as f:
+                f.write('\n'.join(content))
 
         print(f"[+] Сохранено письмо #{msg_num}: {filename}")
         return filepath
@@ -337,14 +351,13 @@ def process_message(message, search_criteria, msg_num, output_dir=None):
     """Обрабатывает отдельное сообщение"""
     try:
         sender = getattr(message, 'sender_name', 'Не указан')
-        recipients = get_recipients(message)
         subject = getattr(message, 'subject', 'Без темы')
         body = get_message_body(message)
         # Конвертируем время в GMT+3
         received_time = convert_to_gmt3(getattr(message, 'delivery_time', None))
         sent_time = convert_to_gmt3(getattr(message, 'client_submit_time', None))
 
-        if not matches_criteria(sender, recipients, subject, body,
+        if not matches_criteria(sender, subject, body,
                                 received_time, sent_time, search_criteria):
             return
 
@@ -370,7 +383,6 @@ def main():
     parser.add_argument('--output-dir', required=True,
                         help='Каталог для сохранения найденных писем')
     parser.add_argument('--sender', help='Фильтр по отправителю')
-    parser.add_argument('--recipient', help='Фильтр по получателю')
     parser.add_argument('--subject', help='Фильтр по теме письма')
     parser.add_argument('--body', help='Фильтр по тексту письма')
     parser.add_argument('--sent-after', help='Письма, отправленные после указанной даты (YYYY-MM-DD HH:MM:SS)')
@@ -383,7 +395,6 @@ def main():
     args = parser.parse_args()
     criteria = {}
     if args.sender: criteria['sender'] = args.sender
-    if args.recipient: criteria['recipient'] = args.recipient
     if args.subject: criteria['subject'] = args.subject
     if args.body: criteria['body'] = args.body
 
