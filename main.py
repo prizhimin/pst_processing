@@ -184,6 +184,8 @@ def detect_attachment_type(data):
         return 'bin'
 
 
+import os
+
 def save_attachments(message, attachments_dir):
     """Сохраняет все вложения из письма с расширением по сигнатуре и уникальным номером"""
     try:
@@ -195,19 +197,22 @@ def save_attachments(message, attachments_dir):
 
         for attachment in message.attachments:
             try:
-                # Получаем имя (если доступно)
-                filename = getattr(attachment, 'name', f'unnamed_{attachment_id}')
-                filename = filename.replace('\n', ' ').replace('\r', ' ').strip()
-                if not filename:
-                    filename = f'unnamed_{attachment_id}'
-
                 # Чтение байтов вложения
                 data = attachment.read_buffer(attachment.size)
 
+                # Проверка размера вложения
+                if len(data) == 0:
+                    print(f"    [!] Пропущено вложение (нулевой размер)")
+                    continue
+
                 # Определяем тип вложения по сигнатуре
                 ext = detect_attachment_type(data)
-                print(f'Расширение {ext}')
-                filename = os.path.splitext(filename)[0] + '.' + ext
+                if ext == 'bin':
+                    print(f"    [!] Пропущено вложение (неизвестный тип)")
+                    continue
+
+                # Формируем имя файла с уникальным номером
+                filename = f"attachment_{attachment_id}.{ext}"
 
                 # Создаём безопасный путь
                 filepath = os.path.join(attachments_dir, filename)
