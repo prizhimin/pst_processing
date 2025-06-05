@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from striprtf.striprtf import rtf_to_text
 import zipfile
 import io
-
+from bs4 import Comment
 
 # Константа для временной зоны GMT+3
 GMT3 = timezone(timedelta(hours=3))
@@ -65,26 +65,43 @@ def format_datetime_gmt3(dt):
 
 
 def get_message_body(message):
-    """Улучшенное извлечение тела письма с обработкой RTF"""
-    try:
-        body = getattr(message, 'plain_text_body', None)
-        # Убираем двойные пробелы
-        # body = re.sub(r'\n{2,}', '\n', body)
+    """Улучшенное извлечение тела письма с обработкой RTF и нормализацией переносов строк"""
+    def normalize_newlines(text):
+        """Удаляет множественные переносы строк и лишние пробелы"""
+        if not text:
+            return text
+        # Заменяем последовательности переносов строк на одинарные
+        text = re.sub(r'([\r\n]+ ?)+', '\n', text)
+        # Удаляем пробелы в начале и конце строк
+        text = '\n'.join(line.strip() for line in text.split('\n'))
+        return text.strip()
 
+    try:
+        # Пытаемся получить plain text тело
+        body = getattr(message, 'plain_text_body', None)
         if body:
             if isinstance(body, bytes):
                 body = body.decode('utf-8', errors='replace')
-            return str(body).strip()
+            return normalize_newlines(str(body))
 
+        # Пытаемся получить RTF тело
         rtf_body = getattr(message, 'rtf_body', None)
-        if isinstance(rtf_body, bytes):
-            rtf_body = rtf_body.decode('utf-8', errors='replace')
         if rtf_body:
-            return rtf_to_text(rtf_body.strip())
+            if isinstance(rtf_body, bytes):
+                rtf_body = rtf_body.decode('utf-8', errors='replace')
+            if rtf_body:
+                return normalize_newlines(rtf_to_text(rtf_body.strip()))
 
+        # Пытаемся получить HTML тело
         html_body = getattr(message, 'html_body', None)
         if html_body:
-            return BeautifulSoup(html_body, 'html.parser').get_text().strip()
+            # Извлекаем текст из HTML
+            soup = BeautifulSoup(html_body, 'html.parser')
+            # Удаляем HTML комментарии
+            for element in soup.find_all(text=lambda text: isinstance(text, Comment)):
+                element.extract()
+            plain_text = soup.get_text()
+            return normalize_newlines(plain_text)
 
         return "Тело письма отсутствует"
     except Exception as e:
@@ -164,14 +181,33 @@ def matches_criteria(sender, subject, body,
     return True
 
 
+import io
+import zipfile
+
+
 def detect_attachment_type(data):
     """Определяет тип вложения по сигнатуре и содержимому"""
+    if not data:
+        return 'bin'
+
+    # PDF
     if data.startswith(b'%PDF'):
         return 'pdf'
+
+    # RAR (версии 1.5-4.x)
     elif data.startswith(b'Rar!\x1A\x07\x00'):
         return 'rar'
+
+    # RAR5 (версии 5.0+)
+    elif data.startswith(b'Rar!\x1A\x07\x01\x00'):
+        return 'rar'
+
+    # 7-Zip
+    elif data.startswith(b'7z\xBC\xAF\x27\x1C'):
+        return '7z'
+
+    # ZIP-based форматы (DOCX, XLSX, ZIP и т.д.)
     elif data.startswith(b'PK\x03\x04'):
-        # Это может быть docx/xlsx/zip
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as z:
                 names = z.namelist()
@@ -179,12 +215,52 @@ def detect_attachment_type(data):
                     return 'docx'
                 elif any(name.startswith('xl/') for name in names):
                     return 'xlsx'
+                elif any(name.startswith('ppt/') for name in names):
+                    return 'pptx'
                 else:
                     return 'zip'
         except Exception:
             return 'zip'
     else:
+        # Попробуем определить по расширению, если данные начинаются с пути/имени файла
+        if len(data) > 4:
+            # Простая проверка на текстовое начало (возможно, имя файла)
+            try:
+                first_part = data[:100].decode('ascii', errors='ignore').lower()
+                if first_part.endswith('.7z'):
+                    return '7z'
+                elif first_part.endswith('.rar'):
+                    return 'rar'
+                elif first_part.endswith('.zip'):
+                    return 'zip'
+                elif first_part.endswith('.pdf'):
+                    return 'pdf'
+            except UnicodeDecodeError:
+                pass
+
         return 'bin'
+
+# def detect_attachment_type(data):
+#     """Определяет тип вложения по сигнатуре и содержимому"""
+#     if data.startswith(b'%PDF'):
+#         return 'pdf'
+#     elif data.startswith(b'Rar!\x1A\x07\x00'):
+#         return 'rar'
+#     elif data.startswith(b'PK\x03\x04'):
+#         # Это может быть docx/xlsx/zip
+#         try:
+#             with zipfile.ZipFile(io.BytesIO(data)) as z:
+#                 names = z.namelist()
+#                 if any(name.startswith('word/') for name in names):
+#                     return 'docx'
+#                 elif any(name.startswith('xl/') for name in names):
+#                     return 'xlsx'
+#                 else:
+#                     return 'zip'
+#         except Exception:
+#             return 'zip'
+#     else:
+#         return 'bin'
 
 
 def save_attachments(message, attachments_dir):
@@ -254,12 +330,9 @@ def save_message_as_txt(message, output_dir, msg_num):
 
         date_part = (received_time or sent_time or datetime.now(GMT3)).strftime('%Y%m%d_%H%M')
         filename_base = f"{date_part}_{sanitize_filename(sender)}_{sanitize_filename(subject)}"
-        # Число вложений
-        has_attachments = hasattr(message, 'attachments') and message.number_of_attachments > 0
-        num_attachments = message.number_of_attachments if has_attachments else 0
-        # Формируем имя текстового файла
-        suffix = f" ({num_attachments} вложений)" if num_attachments > 0 else ""
-        filename = f"{filename_base}{suffix}.txt"
+
+        # Сначала сохраняем письмо без количества вложений
+        filename = f"{filename_base}.txt"
         filepath = os.path.join(output_dir, filename)
 
         body = get_message_body(message)
@@ -286,55 +359,39 @@ def save_message_as_txt(message, output_dir, msg_num):
             attachments_dir = os.path.join(output_dir, filename_base)
             os.makedirs(attachments_dir, exist_ok=True)
             saved_attachments = save_attachments(message, attachments_dir)
-            content.append(f"\nВЛОЖЕНИЯ: {saved_attachments} файлов сохранено в {attachments_dir}")
+            # content.append(f"\nВЛОЖЕНИЯ: {saved_attachments} файлов сохранено в {attachments_dir}")
 
             # Обновляем файл с информацией о вложениях
             with open(filepath, 'w', encoding='utf-8', errors='replace') as f:
                 f.write('\n'.join(content))
 
-        print(f"[+] Сохранено письмо #{msg_num}: {filename}")
+            # Теперь переименовываем текстовый файл с учетом количества вложений
+            if saved_attachments > 0:
+                new_filename = f"{filename_base} ({saved_attachments} вложений)_{msg_num}.txt"
+                new_filepath = os.path.join(output_dir, new_filename)
+                os.rename(filepath, new_filepath)
+                filepath = new_filepath
+
+            # Переименовываем папку с вложениями
+            if saved_attachments > 0:
+                new_attachments_dir = os.path.join(output_dir, f"{filename_base} ({saved_attachments} вложений)_{msg_num}")
+                os.rename(attachments_dir, new_attachments_dir)
+
+            # Проверяем и удаляем пустую папку перед возвратом
+            if attachments_dir and os.path.exists(attachments_dir):
+                try:
+                    if not os.listdir(attachments_dir):  # Если папка пустая
+                        os.rmdir(attachments_dir)
+                except (OSError, PermissionError) as e:
+                    print(f"[!] Не удалось удалить пустую папку {attachments_dir}: {str(e)}")
+
+        print(f"[+] Сохранено письмо #{msg_num}: {filepath}")
         return filepath
     except Exception as e:
         print(f"[!] Критическая ошибка при сохранении письма #{msg_num}: {str(e)}")
         return None
 
 
-# def save_message_as_txt(message, attachments_dir, msg_num):
-#     """
-#     Сохраняет текстовое содержимое письма в .txt файл.
-#     Если у письма есть вложения, в имя файла добавляется "(X вложений)".
-#     """
-#
-#     try:
-#         # Создаём папку, если её нет
-#         os.makedirs(attachments_dir, exist_ok=True)
-#
-#         # Получаем ID сообщения
-#         message_id = getattr(message, 'id', 'unknown')
-#
-#         # Проверяем наличие вложений
-#         has_attachments = hasattr(message, 'attachments') and message.number_of_attachments > 0
-#         num_attachments = message.number_of_attachments if has_attachments else 0
-#
-#         # Формируем имя текстового файла
-#         suffix = f" ({num_attachments} вложений)" if num_attachments > 0 else ""
-#         text_filename = f"message_{message_id}{suffix}.txt"
-#         text_filepath = os.path.join(attachments_dir, text_filename)
-#
-#         # Получаем тело письма
-#         body = getattr(message, 'body', '(тело письма отсутствует)')
-#
-#         # Сохраняем текст письма в файл
-#         with open(text_filepath, 'w', encoding='utf-8') as f:
-#             f.write(body)
-#
-#         print(f"    [i] Сохранён текст письма: {text_filename}")
-#
-#         return 1  # Возвращаем 1, так как файл сохранён
-#
-#     except Exception as e:
-#         print(f"[!] Ошибка при сохранении текста письма: {e}")
-#         return 0
 
 
 def parse_datetime(dt_str):
@@ -378,7 +435,8 @@ def search_pst(pst_path, search_criteria, output_dir=None):
 
         print(f"\n[+] Поиск завершен. Обработано сообщений: {total_messages}")
         if output_dir and os.path.exists(output_dir):
-            print(f"[+] Сохранено писем: {len(os.listdir(output_dir))}")
+            txt_files = [f for f in os.listdir(output_dir) if f.endswith('.txt')]
+            print(f"[+] Сохранено писем: {len(txt_files)}")
         pst.close()
     except IOError as e:
         print(f"[!] Ошибка при открытии файла: {e}")

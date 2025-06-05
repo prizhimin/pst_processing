@@ -1,40 +1,46 @@
 import pypff
+from email import policy
+from email.parser import BytesParser
 
-def extract_attachments(pst_file_path):
-    pst = pypff.file()
-    pst.open(pst_file_path)
 
-    root_folder = pst.get_root_folder()
+def get_attachment_names(pst_file_path):
+    pst_file = pypff.file()
+    pst_file.open(pst_file_path)
+
+    root_folder = pst_file.get_root_folder()
+    attachment_names = []
 
     def process_folder(folder):
-        print(f"\nПапка: {folder.name}")
+        for sub_folder in folder.sub_folders:
+            process_folder(sub_folder)
 
         for message in folder.sub_messages:
-            print(f"\n  Письмо: {message.subject}")
+            # Получаем тело сообщения в виде байтов
+            raw_email = message.get_plain_text_body()  # Получаем тело сообщения в виде байтов (или get_rtf_body() для RTF)
+            print(raw_email)
 
-            if message.number_of_attachments > 0:
-                print("  Вложения:")
-                for i, attachment in enumerate(message.attachments, 1):
-                    # Попытка получить имя вложения через стандартные поля
-                    print(f'{dir(attachment)}')
-                    print(attachment.get_number_of_entries())
-                    attachment_name = None
-                    for attr in ['long_filename', 'short_filename', 'filename']:
-                        if hasattr(attachment, attr):
-                            attachment_name = getattr(attachment, attr)
-                            if attachment_name:
-                                break
+            if raw_email:  # Если тело сообщения не пустое
+                # Парсим его с использованием BytesParser
+                msg = BytesParser(policy=policy.default).parsebytes(raw_email)
+                print(msg)
 
-                    if not attachment_name:
-                        attachment_name = f"Вложение_{i}"
+                # Проходим по всем частям сообщения (включая вложения)
+                for part in msg.walk():
+                    # Проверяем, является ли часть вложением через Content-Type и наличие имени файла
+                    content_type = part.get_content_type()
+                    filename = part.get_filename()
 
-                    print(f"    - {attachment_name}")
-
-        for subfolder in folder.sub_folders:
-            process_folder(subfolder)
+                    # Если тип контента - это обычное вложение, изображение или любой другой файл
+                    if filename or (content_type not in ["text/plain", "text/html", "multipart/alternative"]):
+                        attachment_names.append(filename if filename else f"Unnamed_{content_type}")
 
     process_folder(root_folder)
-    pst.close()
+    pst_file.close()
+    return attachment_names
 
-# Пример использования
-extract_attachments(r"R:\PST\TestPST.pst")
+
+# Пример использования функции
+if __name__ == "__main__":
+    pst_file_path = r"r:\TestPST.pst"  # Путь к вашему PST файлу
+    attachment_names = get_attachment_names(pst_file_path)
+    print("Названия вложений:", attachment_names)
