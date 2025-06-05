@@ -1,6 +1,6 @@
 @echo off
 chcp 1251
-set KEYWORDS=Ротек Архангельск Норильск Мокулаевск "ТЭЦ-2" котельная ЦБК аэропорт
+set KEYWORDS=ТЭЦ-2
 
 for %%k in (%KEYWORDS%) do (
     echo Поиск по ключевому слову: "%%k"

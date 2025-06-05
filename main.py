@@ -98,7 +98,8 @@ def get_message_body(message):
             # Извлекаем текст из HTML
             soup = BeautifulSoup(html_body, 'html.parser')
             # Удаляем HTML комментарии
-            for element in soup.find_all(text=lambda text: isinstance(text, Comment)):
+            for element in soup.find_all(string=lambda text: isinstance(text, Comment)):
+            # for element in soup.find_all(text=lambda text: isinstance(text, Comment)):
                 element.extract()
             plain_text = soup.get_text()
             return normalize_newlines(plain_text)
